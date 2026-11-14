@@ -22,6 +22,8 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template_string
+import gspread
+from google.oauth2.service_account import Credentials
 
 app = Flask(__name__)
 
@@ -29,6 +31,51 @@ CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 
 DB_PATH = os.environ.get("DB_PATH", "line_messages.db")
+
+# Google Sheets (รับออเดอร์)
+GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID", "")
+GOOGLE_WORKSHEET = os.environ.get("GOOGLE_WORKSHEET", "Orders")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+GOOGLE_SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
+SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+_sheets_ws = None
+
+def get_sheets_worksheet():
+    global _sheets_ws
+    if _sheets_ws is not None:
+        return _sheets_ws
+    if not GOOGLE_SHEET_ID:
+        return None
+    try:
+        if GOOGLE_SERVICE_ACCOUNT_JSON:
+            info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+            creds = Credentials.from_service_account_info(info, scopes=SHEETS_SCOPES)
+        else:
+            creds = Credentials.from_service_account_file(GOOGLE_SERVICE_ACCOUNT_FILE, scopes=SHEETS_SCOPES)
+        client = gspread.authorize(creds)
+        sh = client.open_by_key(GOOGLE_SHEET_ID)
+        try:
+            ws = sh.worksheet(GOOGLE_WORKSHEET)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title=GOOGLE_WORKSHEET, rows=1000, cols=10)
+            ws.append_row(["received_at", "user_id", "group_id", "room_id", "message_type", "text"])
+        _sheets_ws = ws
+        return ws
+    except Exception as e:
+        print("sheets init error:", e)
+        return None
+
+def append_order_to_sheet(row):
+    ws = get_sheets_worksheet()
+    if ws is None:
+        return False
+    try:
+        ws.append_row(row, value_input_option="USER_ENTERED")
+        return True
+    except Exception as e:
+        print("sheets append error:", e)
+        return False
 
 
 # ---------- Database ----------
@@ -146,17 +193,26 @@ def webhook():
         save_message(event)
 
         if event.get("type") == "message":
-            reply_token = event.get("replyToken")
-            msg = event.get("message", {}) or {}
-            mtype = msg.get("type")
             src = event.get("source", {}) or {}
+            msg = event.get("message", {}) or {}
+            append_order_to_sheet([
+                datetime.now(timezone.utc).isoformat(),
+                src.get("userId"),
+                src.get("groupId"),
+                src.get("roomId"),
+                msg.get("type"),
+                msg.get("text"),
+            ])
+
+            reply_token = event.get("replyToken")
+            mtype = msg.get("type")
             user_id = src.get("userId")
 
             if mtype == "text":
                 text = msg.get("text", "")
                 print(f"[MSG] user={user_id} text={text!r}")
                 reply_message(reply_token, [
-                    {"type": "text", "text": f"ได้รับข้อความแล้ว: {text}"}
+                    {"type": "text", "text": f"บันทึกออเดอร์แล้ว ✅\\n{text}"}
                 ])
             elif mtype in ("image", "video", "audio", "file"):
                 reply_message(reply_token, [
