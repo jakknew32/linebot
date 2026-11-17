@@ -802,7 +802,6 @@ def dashboard():
       const pb=document.getElementById('prodBody'); if(pb){pb.innerHTML='';prods.forEach(p=>{const tr=document.createElement('tr');tr.innerHTML='<td>'+p.product+'</td><td>'+p.total_qty+'</td><td>'+p.orders+'</td>';pb.appendChild(tr);});}
       new Chart(document.getElementById('prodChart'),{type:'bar',data:{labels:prods.map(x=>x.product),datasets:[{label:'จำนวนรวม',data:prods.map(x=>x.total_qty),backgroundColor:'#06c755'}]},options:{plugins:{title:{display:true,text:'สรุปสินค้า'}}}});
     }
-    }
     async function loadMsgs(newOffset){
       if(newOffset!==undefined) offset=newOffset;
       const q=encodeURIComponent(document.getElementById('q').value);
