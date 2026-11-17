@@ -357,7 +357,6 @@ def list_messages(limit=50, offset=0, q="", user_id="", mtype="", date_from="", 
     sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
     rows = conn.execute(sql, params).fetchall()
-    # total
     csql = "SELECT COUNT(*) FROM messages"
     cparams = []
     if where:
@@ -382,25 +381,21 @@ def stats():
     rows, total = list_messages(limit=5000, offset=0)
     today = datetime.now(timezone.utc).date().isoformat()
     today_count = sum(1 for r in rows if str(r.get("received_at", "")).startswith(today))
-    # by day (last 7)
     by_day = defaultdict(int)
     for r in rows:
         d = str(r.get("received_at", ""))[:10]
         if d:
             by_day[d] += 1
-    # last 7 days including zeros
     last7 = []
     for i in range(6, -1, -1):
         d = (datetime.now(timezone.utc).date() - timedelta(days=i)).isoformat()
         last7.append({"date": d, "count": by_day.get(d, 0)})
-    # top users
     uc = Counter(r.get("user_id") for r in rows if r.get("user_id"))
     top_users = []
     for uid, c in uc.most_common(5):
         u = get_user(uid)
         name = (u or {}).get("display_name") or uid
         top_users.append({"user_id": uid, "name": name, "count": c})
-    # by type
     tc = Counter(r.get("message_type") or r.get("event_type") for r in rows)
     by_type = [{"type": k, "count": v} for k, v in tc.most_common()]
     users = list_users(1000)
@@ -549,33 +544,87 @@ def stats_endpoint():
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     html = """
-    <!doctype html><html><head><meta charset="utf-8"><title>Dashboard</title>
+    <!doctype html><html><head><meta charset="utf-8"><title>LINE Bot Data</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>body{font-family:sans-serif;margin:20px}
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:20px}
-    .card{background:#f4f6f8;padding:16px;border-radius:8px}
-    .card h3{margin:0;font-size:14px;color:#555}.card .v{font-size:28px;font-weight:bold}
-    .chart{max-width:700px;margin:20px 0}</style></head><body>
-    <h2>📊 Dashboard</h2>
-    <div class="grid">
-      <div class="card"><h3>ข้อความทั้งหมด</h3><div class="v" id="total">-</div></div>
-      <div class="card"><h3>วันนี้</h3><div class="v" id="today">-</div></div>
-      <div class="card"><h3>ผู้ใช้ทั้งหมด</h3><div class="v" id="users">-</div></div>
+    <style>
+    body{font-family:sans-serif;margin:0;background:#f4f6f8}
+    header{background:#06c755;color:#fff;padding:16px 20px}
+    .wrap{max-width:1100px;margin:0 auto;padding:20px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px}
+    .card{background:#fff;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+    .card h3{margin:0;font-size:13px;color:#666}.card .v{font-size:26px;font-weight:bold;margin-top:4px}
+    .chart{background:#fff;padding:16px;border-radius:8px;margin:20px 0;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+    .chart canvas{max-height:260px}
+    .panel{background:#fff;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin:20px 0}
+    table{border-collapse:collapse;width:100%}th,td{border:1px solid #eee;padding:8px;font-size:13px}
+    th{background:#06c755;color:#fff}tr:nth-child(even){background:#fafafa}
+    input,select{padding:6px;margin:4px;border:1px solid #ddd;border-radius:4px}
+    button{padding:6px 12px;background:#06c755;color:#fff;border:none;border-radius:4px;cursor:pointer}
+    .topbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+    .pager{display:flex;gap:8px;align-items:center;margin-top:10px}
+    </style></head><body>
+    <header><h1 style="margin:0">📩 LINE Bot — ข้อมูลที่เก็บมา</h1></header>
+    <div class="wrap">
+      <div class="grid">
+        <div class="card"><h3>ข้อความทั้งหมด</h3><div class="v" id="total">-</div></div>
+        <div class="card"><h3>วันนี้</h3><div class="v" id="today">-</div></div>
+        <div class="card"><h3>ผู้ใช้ทั้งหมด</h3><div class="v" id="users">-</div></div>
+      </div>
+      <div class="chart"><canvas id="dayChart"></canvas></div>
+      <div class="chart"><canvas id="typeChart"></canvas></div>
+      <div class="panel">
+        <h3 style="margin-top:0">ข้อความ</h3>
+        <div class="topbar">
+          <input id="q" placeholder="ค้นหา...">
+          <input id="uid" placeholder="user_id">
+          <input id="typ" placeholder="type">
+          <button onclick="loadMsgs(0)">ค้นหา</button>
+          <a href="/messages/export.csv"><button type="button">Export CSV</button></a>
+        </div>
+        <table><thead><tr><th>ID</th><th>เวลา</th><th>User</th><th>ประเภท</th><th>ข้อความ</th></tr></thead>
+        <tbody id="tbody"></tbody></table>
+        <div class="pager">
+          <button onclick="prevPage()">◀ ก่อนหน้า</button>
+          <span id="pageinfo"></span>
+          <button onclick="nextPage()">ถัดไป ▶</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-top:0">Top users</h3><ul id="top"></ul>
+        <p><a href="/users">ดูทั้งหมด</a> | <a href="/messages">หน้า messages แบบเดิม</a></p>
+      </div>
     </div>
-    <div class="chart"><canvas id="dayChart"></canvas></div>
-    <div class="chart"><canvas id="typeChart"></canvas></div>
-    <h3>Top users</h3><ul id="top"></ul>
     <script>
-    fetch('/stats').then(r=>r.json()).then(d=>{
+    let offset=0, limit=20, total=0;
+    async function loadStats(){
+      const d=await (await fetch('/stats')).json();
       document.getElementById('total').textContent=d.total_messages;
       document.getElementById('today').textContent=d.today_messages;
       document.getElementById('users').textContent=d.total_users;
-      new Chart(document.getElementById('dayChart'),{type:'bar',data:{labels:d.last7.map(x=>x.date),datasets:[{label:'ข้อความ',data:d.last7.map(x=>x.count),backgroundColor:'#06c755'}]}});
-      new Chart(document.getElementById('typeChart'),{type:'doughnut',data:{labels:d.by_type.map(x=>x.type),datasets:[{data:d.by_type.map(x=>x.count)}]}});
-      const ul=document.getElementById('top'); d.top_users.forEach(u=>{const li=document.createElement('li');li.textContent=u.name+' ('+u.count+')';ul.appendChild(li);});
-    });
+      new Chart(document.getElementById('dayChart'),{type:'bar',data:{labels:d.last7.map(x=>x.date),datasets:[{label:'ข้อความ',data:d.last7.map(x=>x.count),backgroundColor:'#06c755'}]},options:{plugins:{title:{display:true,text:'ข้อความ 7 วันล่าสุด'}}}});
+      new Chart(document.getElementById('typeChart'),{type:'doughnut',data:{labels:d.by_type.map(x=>x.type),datasets:[{data:d.by_type.map(x=>x.count)}]},options:{plugins:{title:{display:true,text:'ตามประเภท'}}}});
+      const ul=document.getElementById('top'); ul.innerHTML=''; d.top_users.forEach(u=>{const li=document.createElement('li');li.innerHTML='<a href="/users/'+u.user_id+'/history">'+u.name+'</a> ('+u.count+')';ul.appendChild(li);});
+    }
+    async function loadMsgs(newOffset){
+      if(newOffset!==undefined) offset=newOffset;
+      const q=encodeURIComponent(document.getElementById('q').value);
+      const uid=encodeURIComponent(document.getElementById('uid').value);
+      const typ=encodeURIComponent(document.getElementById('typ').value);
+      const url='/messages?format=json&limit='+limit+'&offset='+offset+'&q='+q+'&user_id='+uid+'&type='+typ;
+      const d=await (await fetch(url)).json();
+      total=d.total;
+      const tb=document.getElementById('tbody'); tb.innerHTML='';
+      d.messages.forEach(r=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML='<td>'+r.id+'</td><td>'+r.received_at+'</td><td>'+ (r.user_id||'') +'</td><td>'+(r.message_type||r.event_type||'')+'</td><td>'+ (r.text||'') +'</td>';
+        tb.appendChild(tr);
+      });
+      document.getElementById('pageinfo').textContent='แสดง '+(offset+1)+'-'+Math.min(offset+limit,total)+' จาก '+total;
+    }
+    function prevPage(){ if(offset>=limit){ loadMsgs(offset-limit);} }
+    function nextPage(){ if(offset+limit<total){ loadMsgs(offset+limit);} }
+    loadStats(); loadMsgs(0);
     </script>
-    <p><a href="/messages">Messages</a> | <a href="/users">Users</a></p>
     </body></html>
     """
     return render_template_string(html)
@@ -590,14 +639,14 @@ def users_page():
     th,td{border:1px solid #ddd;padding:8px;font-size:13px}th{background:#06c755;color:#fff}
     img{width:40px;height:40px;border-radius:50%}</style></head><body>
     <h2>👥 ผู้ใช้ ({{n}})</h2>
-    <table><tr><th>รูป</th><th>User ID</th><th>ชื่อ</th><th>ข้อความ</th><th>อัปเดต</th></tr>
+    <table><tr><th>รูป</th><th>User ID</th><th>ชื่อ</th><th>อัปเดต</th></tr>
     {% for u in users %}
     <tr><td>{% if u['picture_url'] %}<img src="{{u['picture_url']}}">{% endif %}</td>
     <td><a href="/users/{{u['user_id']}}/history">{{u['user_id']}}</a></td>
-    <td>{{u['display_name']}}</td><td>-</td><td>{{u['updated_at']}}</td></tr>
+    <td>{{u['display_name']}}</td><td>{{u['updated_at']}}</td></tr>
     {% endfor %}
     </table>
-    <p><a href="/messages">Messages</a> | <a href="/dashboard">Dashboard</a></p>
+    <p><a href="/dashboard">Dashboard</a></p>
     </body></html>
     """
     return render_template_string(html, users=users, n=len(users))
@@ -618,7 +667,7 @@ def user_history_page(user_id):
     <tr><td>{{r['received_at']}}</td><td>{{r['message_type'] or r['event_type']}}</td><td>{{r['text']}}</td></tr>
     {% endfor %}
     </table>
-    <p><a href="/users">Users</a> | <a href="/messages">Messages</a></p>
+    <p><a href="/users">Users</a> | <a href="/dashboard">Dashboard</a></p>
     </body></html>
     """
     return render_template_string(html, rows=rows, name=name)
@@ -635,7 +684,7 @@ def health():
 
 @app.route("/", methods=["GET"])
 def index():
-    return "LINE Bot reader is running. POST /webhook, GET /messages, /dashboard, /health"
+    return render_template_string('<meta http-equiv="refresh" content="0; url=/dashboard">กำลังไปหน้า dashboard...')
 
 
 if __name__ == "__main__":
