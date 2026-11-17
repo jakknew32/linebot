@@ -777,6 +777,7 @@ def dashboard():
         <div class="card"><h3>จำนวนรวมทั้งหมด</h3><div class="v" id="prodTotal">-</div></div>
       </div>
       <div class="chart"><canvas id="prodChart"></canvas></div>
+      <div class="chart"><canvas id="prodDonut"></canvas></div>
       <div class="panel">
         <h3 style="margin-top:0">สรุปสินค้า</h3>
         <table><thead><tr><th>สินค้า</th><th>จำนวนรวม</th><th>ออเดอร์</th></tr></thead>
@@ -801,6 +802,7 @@ def dashboard():
       document.getElementById('prodTotal').textContent=prods.reduce((a,p)=>a+(p.total_qty||0),0);
       const pb=document.getElementById('prodBody'); if(pb){pb.innerHTML='';prods.forEach(p=>{const tr=document.createElement('tr');tr.innerHTML='<td>'+p.product+'</td><td>'+p.total_qty+'</td><td>'+p.orders+'</td>';pb.appendChild(tr);});}
       new Chart(document.getElementById('prodChart'),{type:'bar',data:{labels:prods.map(x=>x.product),datasets:[{label:'จำนวนรวม',data:prods.map(x=>x.total_qty),backgroundColor:'#06c755'}]},options:{plugins:{title:{display:true,text:'สรุปสินค้า'}}}});
+      new Chart(document.getElementById('prodDonut'),{type:'doughnut',data:{labels:prods.map(x=>x.product),datasets:[{data:prods.map(x=>x.total_qty)}]},options:{plugins:{title:{display:true,text='สัดส่วนสินค้า'}}}});
     }
     async function loadMsgs(newOffset){
       if(newOffset!==undefined) offset=newOffset;
