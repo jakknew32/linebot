@@ -765,10 +765,6 @@ def dashboard():
     .panel{background:#fff;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin:20px 0}
     table{border-collapse:collapse;width:100%}th,td{border:1px solid #eee;padding:8px;font-size:13px}
     th{background:#06c755;color:#fff}tr:nth-child(even){background:#fafafa}
-    input,select{padding:6px;margin:4px;border:1px solid #ddd;border-radius:4px}
-    button{padding:6px 12px;background:#06c755;color:#fff;border:none;border-radius:4px;cursor:pointer}
-    .topbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
-    .pager{display:flex;gap:8px;align-items:center;margin-top:10px}
     </style></head><body>
     <header><h1 style="margin:0">📩 LINE Bot — ข้อมูลที่เก็บมา</h1></header>
     <div class="wrap">
@@ -783,18 +779,9 @@ def dashboard():
         <table><thead><tr><th>สินค้า</th><th>จำนวนรวม</th><th>ออเดอร์</th></tr></thead>
         <tbody id="prodBody"></tbody></table>
       </div>
-        <table><thead><tr><th>สินค้า</th><th>จำนวนรวม</th><th>ออเดอร์</th></tr></thead>
-        <tbody id="prodBody"></tbody></table>
-      </div>
-        <table><thead><tr><th>สินค้า</th><th>จำนวนรวม</th><th>ออเดอร์</th></tr></thead>
-        <tbody id="prodBody"></tbody></table>
-      </div>
-      <div class="panel"><ul id="top"></ul>
-        <p><a href="/users">ดูทั้งหมด</a> | <a href="/messages">หน้า messages แบบเดิม</a></p>
-      </div>
+      <p><a href="/messages">หน้า messages แบบเดิม</a></p>
     </div>
     <script>
-    let offset=0, limit=20, total=0;
     async function loadStats(){
       const d=await (await fetch('/stats')).json();
       const prods=d.products||[];
@@ -802,27 +789,8 @@ def dashboard():
       document.getElementById('prodTotal').textContent=prods.reduce((a,p)=>a+(p.total_qty||0),0);
       const pb=document.getElementById('prodBody'); if(pb){pb.innerHTML='';prods.forEach(p=>{const tr=document.createElement('tr');tr.innerHTML='<td>'+p.product+'</td><td>'+p.total_qty+'</td><td>'+p.orders+'</td>';pb.appendChild(tr);});}
       new Chart(document.getElementById('prodChart'),{type:'bar',data:{labels:prods.map(x=>x.product),datasets:[{label:'จำนวนรวม',data:prods.map(x=>x.total_qty),backgroundColor:'#06c755'}]},options:{plugins:{title:{display:true,text:'สรุปสินค้า'}}}});
-      new Chart(document.getElementById('prodDonut'),{type:'doughnut',data:{labels:prods.map(x=>x.product),datasets:[{data:prods.map(x=>x.total_qty)}]},options:{plugins:{title:{display:true,text='สัดส่วนสินค้า'}}}});
+      new Chart(document.getElementById('prodDonut'),{type:'doughnut',data:{labels:prods.map(x=>x.product),datasets:[{data:prods.map(x=>x.total_qty)}]},options:{plugins:{title:{display:true,text:'สัดส่วนสินค้า'}}}});
     }
-    async function loadMsgs(newOffset){
-      if(newOffset!==undefined) offset=newOffset;
-      const q=encodeURIComponent(document.getElementById('q').value);
-      const uid=encodeURIComponent(document.getElementById('uid').value);
-      const url='/messages?format=json&limit='+limit+'&offset='+offset+'&q='+q+'&user_id='+uid+'&type=text';
-      const d=await (await fetch(url)).json();
-      total=d.total;
-      const tb=document.getElementById('tbody'); tb.innerHTML='';
-      d.messages.forEach(r=>{
-        const tr=document.createElement('tr');
-        let items=r.items; if(typeof items==='string'){try{items=JSON.parse(items);}catch(e){}} 
-        const itemStr=Array.isArray(items)?items.map(it=>(it.product||'')+'='+ (it.qty||'')).join(', '):(items||'');
-        tr.innerHTML='<td>'+r.id+'</td><td>'+r.received_at+'</td><td>'+(r.user_id||'')+'</td><td>'+(r.store_code||'')+'</td><td>'+(r.store_name||'')+(r.branch?' - '+r.branch:'')+'</td><td>'+(r.delivery_date||'')+'</td><td>'+itemStr+'</td><td>'+(r.phone||'')+'</td><td>'+(r.note||'')+'</td>';
-        tb.appendChild(tr);
-      });
-      document.getElementById('pageinfo').textContent='แสดง '+(offset+1)+'-'+Math.min(offset+limit,total)+' จาก '+total;
-    }
-    function prevPage(){ if(offset>=limit){ loadMsgs(offset-limit);} }
-    function nextPage(){ if(offset+limit<total){ loadMsgs(offset+limit);} }
     loadStats();
     </script>
     </body></html>
