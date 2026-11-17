@@ -779,24 +779,12 @@ def dashboard():
       </div>
       <div class="chart"><canvas id="dayChart"></canvas></div>
       <div class="chart"><canvas id="typeChart"></canvas></div>
-      <div class="panel">
-        <h3 style="margin-top:0">ข้อความ</h3>
-        <div class="topbar">
-          <input id="q" placeholder="ค้นหา...">
-          <input id="uid" placeholder="user_id">
-          <button onclick="loadMsgs(0)">ค้นหา</button>
-          <a href="/messages/export.csv" download="messages.csv"><button type="button">Export CSV</button></a>
-        </div>
-        <table><thead><tr><th>ID</th><th>เวลา</th><th>User</th><th>ร้าน</th><th>ชื่อ-สาขา</th><th>วันส่ง</th><th>รายการ</th><th>โทร</th><th>หมายเหตุ</th></tr></thead>
-        <tbody id="tbody"></tbody></table>
-        <div class="pager">
-          <button onclick="prevPage()">◀ ก่อนหน้า</button>
-          <span id="pageinfo"></span>
-          <button onclick="nextPage()">ถัดไป ▶</button>
-        </div>
-      </div>
+      <div class="chart"><canvas id="prodChart"></canvas></div>
       <div class="panel">
         <h3 style="margin-top:0">สรุปสินค้า</h3>
+        <table><thead><tr><th>สินค้า</th><th>จำนวนรวม</th><th>ออเดอร์</th></tr></thead>
+        <tbody id="prodBody"></tbody></table>
+      </div>
         <table><thead><tr><th>สินค้า</th><th>จำนวนรวม</th><th>ออเดอร์</th></tr></thead>
         <tbody id="prodBody"></tbody></table>
       </div>
@@ -815,6 +803,7 @@ def dashboard():
       new Chart(document.getElementById('typeChart'),{type:'doughnut',data:{labels:d.by_type.map(x=>x.type),datasets:[{data:d.by_type.map(x=>x.count)}]},options:{plugins:{title:{display:true,text:'ตามประเภท'}}}});
       const ul=document.getElementById('top'); ul.innerHTML=''; d.top_users.forEach(u=>{const li=document.createElement('li');li.innerHTML='<a href="/users/'+u.user_id+'/history">'+u.name+'</a> ('+u.count+')';ul.appendChild(li);});
       const pb=document.getElementById('prodBody'); if(pb){pb.innerHTML='';(d.products||[]).forEach(p=>{const tr=document.createElement('tr');tr.innerHTML='<td>'+p.product+'</td><td>'+p.total_qty+'</td><td>'+p.orders+'</td>';pb.appendChild(tr);});}
+      new Chart(document.getElementById('prodChart'),{type:'bar',data:{labels:(d.products||[]).map(x=>x.product),datasets:[{label:'จำนวนรวม',data:(d.products||[]).map(x=>x.total_qty),backgroundColor:'#06c755'}]},options:{plugins:{title:{display:true,text:'สรุปสินค้า'}}}});
     }
     async function loadMsgs(newOffset){
       if(newOffset!==undefined) offset=newOffset;
@@ -835,7 +824,7 @@ def dashboard():
     }
     function prevPage(){ if(offset>=limit){ loadMsgs(offset-limit);} }
     function nextPage(){ if(offset+limit<total){ loadMsgs(offset+limit);} }
-    loadStats(); loadMsgs(0);
+    loadStats();
     </script>
     </body></html>
     """
