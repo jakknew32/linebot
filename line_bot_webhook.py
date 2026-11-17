@@ -9,6 +9,7 @@ LINE Bot - อ่านข้อความใน LINE (Webhook) + Supabase
 - Dashboard / สถิติ / export CSV / ประวัติต่อ user
 """
 import os
+import re
 import json
 import hmac
 import hashlib
@@ -235,41 +236,80 @@ def parse_order_text(text):
     }
     if not text:
         return result
-    lines = [ln.strip() for ln in str(text).splitlines() if ln.strip()]
-    if not lines:
-        return result
-    if len(lines) >= 1:
-        result["store_code"] = lines[0]
-    if len(lines) >= 2:
-        line2 = lines[1]
-        result["store_name"] = line2
-        if " - " in line2:
-            parts = line2.split(" - ", 1)
-            result["store_name"] = parts[0].strip()
-            result["branch"] = parts[1].strip()
-        elif "-" in line2:
-            parts = line2.split("-", 1)
-            result["store_name"] = parts[0].strip()
-            result["branch"] = parts[1].strip()
-    if len(lines) >= 3:
-        result["delivery_date"] = lines[2]
+    s = str(text)
+    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
 
-    phone_idx = None
+    # delivery date
+    m = re.search(r'วันที่(?:จัดส่ง)?\s*[:：]?\s*([0-9]{1,2}[\/\-][0-9]{1,2}(?:[\/\-][0-9]{2,4})?)', s)
+    if m:
+        result["delivery_date"] = m.group(1).strip()
+
+    # phone: prefer "โทร ..." then fallback pattern
+    m = re.search(r'โทร\s*[:：]?\s*([0-9][0-9\-\s]{7,})', s)
+    if m:
+        result["phone"] = m.group(1).strip().rstrip()
+    else:
+        m = re.search(r'(?<!\d)(\d{2,3}-\d{3,4}-\d{4})(?!\d)', s)
+        if m:
+            result["phone"] = m.group(1).strip()
+
+    # items: product = qty (product length limited to avoid spanning)
+    for m in re.finditer(r'([A-Za-zก-๙][A-Za-z0-9ก-๙ .]{0,25}?)\s*=\s*(\d+(?:\.\d+)?)', s):
+        prod = m.group(1).strip()
+        if 'วันที่' in prod or 'โทร' in prod:
+            continue
+        result["items"].append({"product": prod, "qty": m.group(2)})
+
+    # store name - branch
+    dash_line_idx = None
     for i, ln in enumerate(lines):
-        if is_phone_line(ln):
-            phone_idx = i
+        if " - " in ln:
+            dash_line_idx = i
             break
 
-    start = 3
-    end = phone_idx if phone_idx is not None else len(lines)
-    for ln in lines[start:end]:
-        if "=" in ln:
-            prod, qty = ln.split("=", 1)
-            result["items"].append({"product": prod.strip(), "qty": qty.strip()})
-    if phone_idx is not None:
-        result["phone"] = lines[phone_idx]
-        note_lines = lines[phone_idx + 1:]
-        result["note"] = "\n".join(note_lines).strip() if note_lines else None
+    if dash_line_idx is not None:
+        dash_line = lines[dash_line_idx]
+        left, right = dash_line.split(" - ", 1)
+        left = left.strip()
+        right = right.strip()
+        # clean branch: cut at double space or known markers
+        for sep in ["  ", " วันที่", " โทร"]:
+            i = right.find(sep)
+            if i != -1:
+                right = right[:i]
+        result["branch"] = right.strip() if right.strip() else None
+
+        if len(lines) > 1 and dash_line_idx > 0:
+            # multi-line: previous non-empty line is store_code
+            result["store_code"] = lines[dash_line_idx - 1].strip()
+            result["store_name"] = left
+        else:
+            # single line: first token = store_code, rest = store_name
+            toks = left.split(None, 1)
+            if len(toks) == 2:
+                result["store_code"] = toks[0]
+                result["store_name"] = toks[1].strip()
+            elif len(toks) == 1:
+                result["store_name"] = toks[0]
+    else:
+        # no dash
+        if lines:
+            toks = lines[0].split(None, 1)
+            result["store_code"] = toks[0]
+            if len(toks) == 2:
+                result["store_name"] = toks[1].strip()
+
+    # note: text after phone
+    if result["phone"]:
+        idx = s.find(result["phone"])
+        if idx != -1:
+            after = s[idx + len(result["phone"]):].strip()
+            if after:
+                result["note"] = after
+    if not result["note"]:
+        # fallback: remove known parts, leftover tail after last item
+        pass
+
     return result
 
 
