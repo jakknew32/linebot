@@ -915,6 +915,47 @@ def index():
     return render_template_string('<meta http-equiv="refresh" content="0; url=/dashboard">กำลังไปหน้า dashboard...')
 
 
+def backfill_parsed():
+    rows, _ = list_messages(limit=1000000, offset=0)
+    sb = get_supabase()
+    for r in rows:
+        if r.get("event_type") != "message" or r.get("message_type") != "text":
+            continue
+        if r.get("store_code") is not None and r.get("items") is not None:
+            continue
+        parsed = parse_order_text(r.get("text"))
+        items_val = parsed.get("items", [])
+        if sb is not None:
+            try:
+                sb.table(SUPABASE_TABLE).update({
+                    "store_code": parsed.get("store_code"),
+                    "store_name": parsed.get("store_name"),
+                    "branch": parsed.get("branch"),
+                    "delivery_date": parsed.get("delivery_date"),
+                    "items": items_val,
+                    "phone": parsed.get("phone"),
+                    "note": parsed.get("note"),
+                }).eq("id", r.get("id")).execute()
+            except Exception as e:
+                print("backfill supabase error:", e)
+        else:
+            conn = get_db()
+            conn.execute(
+                """UPDATE messages SET store_code=?, store_name=?, branch=?, delivery_date=?, items=?, phone=?, note=? WHERE id=?""",
+                (parsed.get("store_code"), parsed.get("store_name"), parsed.get("branch"),
+                 parsed.get("delivery_date"), json.dumps(items_val, ensure_ascii=False),
+                 parsed.get("phone"), parsed.get("note"), r.get("id")),
+            )
+            conn.commit()
+            conn.close()
+
+
+try:
+    backfill_parsed()
+except Exception as e:
+    print("backfill error:", e)
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False)
