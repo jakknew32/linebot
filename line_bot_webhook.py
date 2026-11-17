@@ -311,6 +311,24 @@ def save_message(event):
             global _last_db_error
             _last_db_error = f"insert: {e}"
             print("supabase insert error:", e)
+            try:
+                conn = get_db()
+                conn.execute(
+                    """INSERT INTO messages
+                       (received_at, user_id, group_id, room_id, event_type, message_type, text, raw_json,
+                        store_code, store_name, branch, delivery_date, items, phone, note)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (received_at, row["user_id"], row["group_id"], row["room_id"],
+                     row["event_type"], row["message_type"], row["text"], row["raw_json"],
+                     row["store_code"], row["store_name"], row["branch"], row["delivery_date"],
+                     json.dumps(row["items"], ensure_ascii=False), row["phone"], row["note"]),
+                )
+                conn.commit()
+                conn.close()
+                _last_db_error = f"supabase failed, saved to sqlite: {e}"
+            except Exception as e2:
+                _last_db_error = f"both failed: {e} | {e2}"
+                print("sqlite fallback error:", e2)
     else:
         conn = get_db()
         conn.execute(
