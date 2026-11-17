@@ -44,6 +44,7 @@ SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 _sheets_ws = None
 _supabase = None
+_last_db_error = None
 
 
 def use_supabase():
@@ -51,13 +52,14 @@ def use_supabase():
 
 
 def get_supabase():
-    global _supabase
+    global _supabase, _last_db_error
     if _supabase is None and use_supabase():
         try:
             from supabase import create_client
             _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         except Exception as e:
             print("supabase init error:", e)
+            _last_db_error = f"init: {e}"
             _supabase = False
     return _supabase if _supabase else None
 
@@ -225,8 +227,15 @@ def save_message(event):
     sb = get_supabase()
     if sb is not None:
         try:
-            sb.table(SUPABASE_TABLE).insert(row).execute()
+            payload = dict(row)
+            try:
+                payload["raw_json"] = json.loads(row["raw_json"]) if row.get("raw_json") else None
+            except Exception:
+                payload["raw_json"] = row.get("raw_json")
+            sb.table(SUPABASE_TABLE).insert(payload).execute()
         except Exception as e:
+            global _last_db_error
+            _last_db_error = f"insert: {e}"
             print("supabase insert error:", e)
     else:
         conn = get_db()
@@ -262,6 +271,8 @@ def upsert_user(user_id):
                 "updated_at": updated_at,
             }).execute()
         except Exception as e:
+            global _last_db_error
+            _last_db_error = f"upsert user: {e}"
             print("supabase upsert user error:", e)
     else:
         conn = get_db()
@@ -673,13 +684,42 @@ def user_history_page(user_id):
     return render_template_string(html, rows=rows, name=name)
 
 
-@app.route("/health", methods=["GET"])
+@app.route("/debug/insert", methods=["GET"])
+def debug_insert():
+    global _last_db_error
+    sb = get_supabase()
+    if sb is None:
+        return jsonify({"ok": False, "error": "supabase not configured", "last_db_error": _last_db_error}), 400
+    try:
+        sb.table(SUPABASE_TABLE).insert({
+            "received_at": now_iso(),
+            "user_id": "DEBUG",
+            "event_type": "debug",
+            "message_type": "debug",
+            "text": "debug insert test",
+            "raw_json": {"debug": True},
+        }).execute()
+        return jsonify({"ok": True, "last_db_error": _last_db_error})
+    except Exception as e:
+        _last_db_error = f"debug insert: {e}"
+        return jsonify({"ok": False, "error": str(e)}), 500
 def health():
-    return jsonify({
+    sb = get_supabase()
+    info = {
         "status": "ok",
         "time": now_iso(),
         "storage": "supabase" if use_supabase() else "sqlite",
-    })
+        "supabase_configured": use_supabase(),
+        "supabase_client_ready": sb is not None,
+        "last_db_error": _last_db_error,
+    }
+    if sb is not None:
+        try:
+            r = sb.table(SUPABASE_TABLE).select("id", count="exact").limit(1).execute()
+            info["supabase_row_count"] = r.count
+        except Exception as e:
+            info["supabase_select_error"] = str(e)
+    return jsonify(info)
 
 
 @app.route("/", methods=["GET"])
