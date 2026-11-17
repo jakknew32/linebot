@@ -1,1 +1,6 @@
-﻿__pycache__/\n*.pyc\nline_messages.db\nservice_account.json\n.env
+﻿__pycache__/
+*.pyc
+line_messages.db
+*.db
+service_account.json
+.env
