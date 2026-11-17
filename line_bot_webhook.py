@@ -711,10 +711,7 @@ def export_csv():
             else:
                 row += ["", ""]
         writer.writerow(row)
-    resp = Response(buf.getvalue(), mimetype="text/csv")
-    resp.headers["Content-Disposition"] = "attachment; filename=messages.csv"
-    return resp
-    resp = Response(buf.getvalue(), mimetype="text/csv")
+    resp = Response("\ufeff" + buf.getvalue(), mimetype="text/csv; charset=utf-8")
     resp.headers["Content-Disposition"] = "attachment; filename=messages.csv"
     return resp
 
