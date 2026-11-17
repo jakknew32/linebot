@@ -684,7 +684,6 @@ def dashboard():
         <div class="topbar">
           <input id="q" placeholder="ค้นหา...">
           <input id="uid" placeholder="user_id">
-          <input id="typ" placeholder="type">
           <button onclick="loadMsgs(0)">ค้นหา</button>
           <a href="/messages/export.csv"><button type="button">Export CSV</button></a>
         </div>
@@ -716,8 +715,7 @@ def dashboard():
       if(newOffset!==undefined) offset=newOffset;
       const q=encodeURIComponent(document.getElementById('q').value);
       const uid=encodeURIComponent(document.getElementById('uid').value);
-      const typ=encodeURIComponent(document.getElementById('typ').value);
-      const url='/messages?format=json&limit='+limit+'&offset='+offset+'&q='+q+'&user_id='+uid+'&type='+typ;
+      const url='/messages?format=json&limit='+limit+'&offset='+offset+'&q='+q+'&user_id='+uid+'&type=text';
       const d=await (await fetch(url)).json();
       total=d.total;
       const tb=document.getElementById('tbody'); tb.innerHTML='';
