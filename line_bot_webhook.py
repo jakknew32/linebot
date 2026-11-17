@@ -773,15 +773,15 @@ def dashboard():
     <header><h1 style="margin:0">📩 LINE Bot — ข้อมูลที่เก็บมา</h1></header>
     <div class="wrap">
       <div class="grid">
-        <div class="card"><h3>ข้อความทั้งหมด</h3><div class="v" id="total">-</div></div>
-        <div class="card"><h3>วันนี้</h3><div class="v" id="today">-</div></div>
-        <div class="card"><h3>ผู้ใช้ทั้งหมด</h3><div class="v" id="users">-</div></div>
+        <div class="card"><h3>รายการสินค้า (ชนิด)</h3><div class="v" id="prodCount">-</div></div>
+        <div class="card"><h3>จำนวนรวมทั้งหมด</h3><div class="v" id="prodTotal">-</div></div>
       </div>
-      <div class="chart"><canvas id="dayChart"></canvas></div>
-      <div class="chart"><canvas id="typeChart"></canvas></div>
       <div class="chart"><canvas id="prodChart"></canvas></div>
       <div class="panel">
         <h3 style="margin-top:0">สรุปสินค้า</h3>
+        <table><thead><tr><th>สินค้า</th><th>จำนวนรวม</th><th>ออเดอร์</th></tr></thead>
+        <tbody id="prodBody"></tbody></table>
+      </div>
         <table><thead><tr><th>สินค้า</th><th>จำนวนรวม</th><th>ออเดอร์</th></tr></thead>
         <tbody id="prodBody"></tbody></table>
       </div>
@@ -796,14 +796,12 @@ def dashboard():
     let offset=0, limit=20, total=0;
     async function loadStats(){
       const d=await (await fetch('/stats')).json();
-      document.getElementById('total').textContent=d.total_messages;
-      document.getElementById('today').textContent=d.today_messages;
-      document.getElementById('users').textContent=d.total_users;
-      new Chart(document.getElementById('dayChart'),{type:'bar',data:{labels:d.last7.map(x=>x.date),datasets:[{label:'ข้อความ',data:d.last7.map(x=>x.count),backgroundColor:'#06c755'}]},options:{plugins:{title:{display:true,text:'ข้อความ 7 วันล่าสุด'}}}});
-      new Chart(document.getElementById('typeChart'),{type:'doughnut',data:{labels:d.by_type.map(x=>x.type),datasets:[{data:d.by_type.map(x=>x.count)}]},options:{plugins:{title:{display:true,text:'ตามประเภท'}}}});
-      const ul=document.getElementById('top'); ul.innerHTML=''; d.top_users.forEach(u=>{const li=document.createElement('li');li.innerHTML='<a href="/users/'+u.user_id+'/history">'+u.name+'</a> ('+u.count+')';ul.appendChild(li);});
-      const pb=document.getElementById('prodBody'); if(pb){pb.innerHTML='';(d.products||[]).forEach(p=>{const tr=document.createElement('tr');tr.innerHTML='<td>'+p.product+'</td><td>'+p.total_qty+'</td><td>'+p.orders+'</td>';pb.appendChild(tr);});}
-      new Chart(document.getElementById('prodChart'),{type:'bar',data:{labels:(d.products||[]).map(x=>x.product),datasets:[{label:'จำนวนรวม',data:(d.products||[]).map(x=>x.total_qty),backgroundColor:'#06c755'}]},options:{plugins:{title:{display:true,text:'สรุปสินค้า'}}}});
+      const prods=d.products||[];
+      document.getElementById('prodCount').textContent=prods.length;
+      document.getElementById('prodTotal').textContent=prods.reduce((a,p)=>a+(p.total_qty||0),0);
+      const pb=document.getElementById('prodBody'); if(pb){pb.innerHTML='';prods.forEach(p=>{const tr=document.createElement('tr');tr.innerHTML='<td>'+p.product+'</td><td>'+p.total_qty+'</td><td>'+p.orders+'</td>';pb.appendChild(tr);});}
+      new Chart(document.getElementById('prodChart'),{type:'bar',data:{labels:prods.map(x=>x.product),datasets:[{label:'จำนวนรวม',data:prods.map(x=>x.total_qty),backgroundColor:'#06c755'}]},options:{plugins:{title:{display:true,text:'สรุปสินค้า'}}}});
+    }
     }
     async function loadMsgs(newOffset){
       if(newOffset!==undefined) offset=newOffset;
