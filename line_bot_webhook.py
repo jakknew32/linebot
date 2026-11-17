@@ -477,6 +477,12 @@ def webhook():
                 {"type": "text", "text": "ขอบคุณที่เพิ่มเพื่อน! ส่งข้อความมาได้เลยครับ"}
             ])
 
+        elif event.get("type") == "join":
+            reply_token = event.get("replyToken")
+            reply_message(reply_token, [
+                {"type": "text", "text": "เข้ากลุ่มแล้วครับ ส่งข้อความมาได้เลย"}
+            ])
+
     return "OK", 200
 
 
