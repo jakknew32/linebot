@@ -758,7 +758,7 @@ def dashboard():
           <input id="q" placeholder="ค้นหา...">
           <input id="uid" placeholder="user_id">
           <button onclick="loadMsgs(0)">ค้นหา</button>
-          <a href="/messages/export.csv"><button type="button">Export CSV</button></a>
+          <a href="/messages/export.csv" download="messages.csv"><button type="button">Export CSV</button></a>
         </div>
         <table><thead><tr><th>ID</th><th>เวลา</th><th>User</th><th>ร้าน</th><th>ชื่อ-สาขา</th><th>วันส่ง</th><th>รายการ</th><th>โทร</th><th>หมายเหตุ</th></tr></thead>
         <tbody id="tbody"></tbody></table>
