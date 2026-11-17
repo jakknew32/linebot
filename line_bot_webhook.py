@@ -544,6 +544,32 @@ def stats():
         top_users.append({"user_id": uid, "name": name, "count": c})
     tc = Counter(r.get("message_type") or r.get("event_type") for r in rows)
     by_type = [{"type": k, "count": v} for k, v in tc.most_common()]
+    # product totals
+    prod_qty = defaultdict(float)
+    prod_orders = Counter()
+    for r in rows:
+        items = r.get("items")
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except Exception:
+                items = []
+        if not isinstance(items, list):
+            continue
+        for it in items:
+            prod = (it.get("product") or "").strip()
+            if not prod:
+                continue
+            q = it.get("qty")
+            try:
+                qn = float(str(q).replace(",", ""))
+            except (ValueError, TypeError):
+                qn = 1.0
+            prod_qty[prod] += qn
+            prod_orders[prod] += 1
+    products = []
+    for prod, q in sorted(prod_qty.items(), key=lambda x: -x[1]):
+        products.append({"product": prod, "total_qty": q, "orders": prod_orders[prod]})
     users = list_users(1000)
     return {
         "total_messages": total,
@@ -552,6 +578,7 @@ def stats():
         "last7": last7,
         "top_users": top_users,
         "by_type": by_type,
+        "products": products,
     }
 
 
@@ -769,7 +796,11 @@ def dashboard():
         </div>
       </div>
       <div class="panel">
-        <h3 style="margin-top:0">Top users</h3><ul id="top"></ul>
+        <h3 style="margin-top:0">สรุปสินค้า</h3>
+        <table><thead><tr><th>สินค้า</th><th>จำนวนรวม</th><th>ออเดอร์</th></tr></thead>
+        <tbody id="prodBody"></tbody></table>
+      </div>
+      <div class="panel"><ul id="top"></ul>
         <p><a href="/users">ดูทั้งหมด</a> | <a href="/messages">หน้า messages แบบเดิม</a></p>
       </div>
     </div>
@@ -783,6 +814,7 @@ def dashboard():
       new Chart(document.getElementById('dayChart'),{type:'bar',data:{labels:d.last7.map(x=>x.date),datasets:[{label:'ข้อความ',data:d.last7.map(x=>x.count),backgroundColor:'#06c755'}]},options:{plugins:{title:{display:true,text:'ข้อความ 7 วันล่าสุด'}}}});
       new Chart(document.getElementById('typeChart'),{type:'doughnut',data:{labels:d.by_type.map(x=>x.type),datasets:[{data:d.by_type.map(x=>x.count)}]},options:{plugins:{title:{display:true,text:'ตามประเภท'}}}});
       const ul=document.getElementById('top'); ul.innerHTML=''; d.top_users.forEach(u=>{const li=document.createElement('li');li.innerHTML='<a href="/users/'+u.user_id+'/history">'+u.name+'</a> ('+u.count+')';ul.appendChild(li);});
+      const pb=document.getElementById('prodBody'); if(pb){pb.innerHTML='';(d.products||[]).forEach(p=>{const tr=document.createElement('tr');tr.innerHTML='<td>'+p.product+'</td><td>'+p.total_qty+'</td><td>'+p.orders+'</td>';pb.appendChild(tr);});}
     }
     async function loadMsgs(newOffset){
       if(newOffset!==undefined) offset=newOffset;
