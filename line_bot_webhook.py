@@ -678,24 +678,42 @@ def messages():
 @app.route("/messages/export.csv", methods=["GET"])
 def export_csv():
     rows, _ = list_messages(limit=1000000, offset=0)
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["id", "received_at", "user_id", "store_code", "store_name", "branch",
-                     "delivery_date", "items", "phone", "note", "text"])
+    # determine max items
+    max_items = 0
+    parsed_rows = []
     for r in rows:
         items = r.get("items")
         if isinstance(items, str):
             try:
                 items = json.loads(items)
             except Exception:
-                pass
-        if isinstance(items, list):
-            items_str = "; ".join(f"{it.get('product')}={it.get('qty')}" for it in items)
-        else:
-            items_str = items
-        writer.writerow([r.get("id"), r.get("received_at"), r.get("user_id"), r.get("store_code"),
-                        r.get("store_name"), r.get("branch"), r.get("delivery_date"), items_str,
-                        r.get("phone"), r.get("note"), r.get("text")])
+                items = []
+        if not isinstance(items, list):
+            items = []
+        parsed_rows.append((r, items))
+        if len(items) > max_items:
+            max_items = len(items)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    header = ["id", "received_at", "user_id", "store_code", "store_name", "branch",
+              "delivery_date", "phone", "note"]
+    for i in range(1, max_items + 1):
+        header += [f"item{i}", f"qty{i}"]
+    writer.writerow(header)
+    for r, items in parsed_rows:
+        row = [r.get("id"), r.get("received_at"), r.get("user_id"), r.get("store_code"),
+               r.get("store_name"), r.get("branch"), r.get("delivery_date"),
+               r.get("phone"), r.get("note")]
+        for i in range(max_items):
+            if i < len(items):
+                row += [items[i].get("product"), items[i].get("qty")]
+            else:
+                row += ["", ""]
+        writer.writerow(row)
+    resp = Response(buf.getvalue(), mimetype="text/csv")
+    resp.headers["Content-Disposition"] = "attachment; filename=messages.csv"
+    return resp
     resp = Response(buf.getvalue(), mimetype="text/csv")
     resp.headers["Content-Disposition"] = "attachment; filename=messages.csv"
     return resp
