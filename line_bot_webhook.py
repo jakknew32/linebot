@@ -138,6 +138,11 @@ def init_db():
             updated_at TEXT
         )"""
     )
+    # migrate: add parsed order columns if missing
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
+    for c in ["store_code", "store_name", "branch", "delivery_date", "items", "phone", "note"]:
+        if c not in cols:
+            conn.execute(f"ALTER TABLE messages ADD COLUMN {c} TEXT")
     conn.commit()
     conn.close()
 
@@ -210,10 +215,70 @@ def get_line_profile(user_id):
 
 
 # ---------- Data access ----------
+def is_phone_line(s):
+    s = s.strip()
+    if not s:
+        return False
+    cleaned = s.replace(" ", "").replace("-", "").replace("+", "")
+    return cleaned.isdigit() and len(cleaned) >= 9
+
+
+def parse_order_text(text):
+    result = {
+        "store_code": None,
+        "store_name": None,
+        "branch": None,
+        "delivery_date": None,
+        "items": [],
+        "phone": None,
+        "note": None,
+    }
+    if not text:
+        return result
+    lines = [ln.strip() for ln in str(text).splitlines() if ln.strip()]
+    if not lines:
+        return result
+    if len(lines) >= 1:
+        result["store_code"] = lines[0]
+    if len(lines) >= 2:
+        line2 = lines[1]
+        result["store_name"] = line2
+        if " - " in line2:
+            parts = line2.split(" - ", 1)
+            result["store_name"] = parts[0].strip()
+            result["branch"] = parts[1].strip()
+        elif "-" in line2:
+            parts = line2.split("-", 1)
+            result["store_name"] = parts[0].strip()
+            result["branch"] = parts[1].strip()
+    if len(lines) >= 3:
+        result["delivery_date"] = lines[2]
+
+    phone_idx = None
+    for i, ln in enumerate(lines):
+        if is_phone_line(ln):
+            phone_idx = i
+            break
+
+    start = 3
+    end = phone_idx if phone_idx is not None else len(lines)
+    for ln in lines[start:end]:
+        if "=" in ln:
+            prod, qty = ln.split("=", 1)
+            result["items"].append({"product": prod.strip(), "qty": qty.strip()})
+    if phone_idx is not None:
+        result["phone"] = lines[phone_idx]
+        note_lines = lines[phone_idx + 1:]
+        result["note"] = "\n".join(note_lines).strip() if note_lines else None
+    return result
+
+
 def save_message(event):
     src = event.get("source", {}) or {}
     msg = event.get("message", {}) or {}
     received_at = now_iso()
+    text = msg.get("text")
+    parsed = parse_order_text(text) if msg.get("type") == "text" else {}
     row = {
         "received_at": received_at,
         "user_id": src.get("userId"),
@@ -221,8 +286,15 @@ def save_message(event):
         "room_id": src.get("roomId"),
         "event_type": event.get("type"),
         "message_type": msg.get("type"),
-        "text": msg.get("text"),
+        "text": text,
         "raw_json": json.dumps(event, ensure_ascii=False),
+        "store_code": parsed.get("store_code"),
+        "store_name": parsed.get("store_name"),
+        "branch": parsed.get("branch"),
+        "delivery_date": parsed.get("delivery_date"),
+        "items": parsed.get("items", []),
+        "phone": parsed.get("phone"),
+        "note": parsed.get("note"),
     }
     sb = get_supabase()
     if sb is not None:
@@ -232,6 +304,8 @@ def save_message(event):
                 payload["raw_json"] = json.loads(row["raw_json"]) if row.get("raw_json") else None
             except Exception:
                 payload["raw_json"] = row.get("raw_json")
+            # items as list (jsonb) for supabase
+            payload["items"] = row.get("items", [])
             sb.table(SUPABASE_TABLE).insert(payload).execute()
         except Exception as e:
             global _last_db_error
@@ -241,10 +315,13 @@ def save_message(event):
         conn = get_db()
         conn.execute(
             """INSERT INTO messages
-               (received_at, user_id, group_id, room_id, event_type, message_type, text, raw_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (received_at, user_id, group_id, room_id, event_type, message_type, text, raw_json,
+                store_code, store_name, branch, delivery_date, items, phone, note)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (received_at, row["user_id"], row["group_id"], row["room_id"],
-             row["event_type"], row["message_type"], row["text"], row["raw_json"]),
+             row["event_type"], row["message_type"], row["text"], row["raw_json"],
+             row["store_code"], row["store_name"], row["branch"], row["delivery_date"],
+             json.dumps(row["items"], ensure_ascii=False), row["phone"], row["note"]),
         )
         conn.commit()
         conn.close()
@@ -528,10 +605,11 @@ def messages():
       <a href="/dashboard">Dashboard</a> |
       <a href="/users">Users</a>
     </form></div>
-    <table><tr><th>ID</th><th>เวลา</th><th>User</th><th>ประเภท</th><th>ข้อความ</th></tr>
+    <table><tr><th>ID</th><th>เวลา</th><th>User</th><th>ร้าน</th><th>ชื่อ-สาขา</th><th>วันส่ง</th><th>รายการ</th><th>โทร</th><th>หมายเหตุ</th></tr>
     {% for r in rows %}
     <tr><td>{{r['id']}}</td><td>{{r['received_at']}}</td><td>{{r['user_id']}}</td>
-    <td>{{r['message_type'] or r['event_type']}}</td><td>{{r['text']}}</td></tr>
+    <td>{{r['store_code']}}</td><td>{{r['store_name']}}{% if r['branch'] %} - {{r['branch']}}{% endif %}</td>
+    <td>{{r['delivery_date']}}</td><td>{{r['items']}}</td><td>{{r['phone']}}</td><td>{{r['note']}}</td></tr>
     {% endfor %}
     </table></body></html>
     """
@@ -544,10 +622,22 @@ def export_csv():
     rows, _ = list_messages(limit=1000000, offset=0)
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["id", "received_at", "user_id", "group_id", "room_id", "event_type", "message_type", "text"])
+    writer.writerow(["id", "received_at", "user_id", "store_code", "store_name", "branch",
+                     "delivery_date", "items", "phone", "note", "text"])
     for r in rows:
-        writer.writerow([r.get("id"), r.get("received_at"), r.get("user_id"), r.get("group_id"),
-                        r.get("room_id"), r.get("event_type"), r.get("message_type"), r.get("text")])
+        items = r.get("items")
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except Exception:
+                pass
+        if isinstance(items, list):
+            items_str = "; ".join(f"{it.get('product')}={it.get('qty')}" for it in items)
+        else:
+            items_str = items
+        writer.writerow([r.get("id"), r.get("received_at"), r.get("user_id"), r.get("store_code"),
+                        r.get("store_name"), r.get("branch"), r.get("delivery_date"), items_str,
+                        r.get("phone"), r.get("note"), r.get("text")])
     resp = Response(buf.getvalue(), mimetype="text/csv")
     resp.headers["Content-Disposition"] = "attachment; filename=messages.csv"
     return resp
@@ -598,7 +688,7 @@ def dashboard():
           <button onclick="loadMsgs(0)">ค้นหา</button>
           <a href="/messages/export.csv"><button type="button">Export CSV</button></a>
         </div>
-        <table><thead><tr><th>ID</th><th>เวลา</th><th>User</th><th>ประเภท</th><th>ข้อความ</th></tr></thead>
+        <table><thead><tr><th>ID</th><th>เวลา</th><th>User</th><th>ร้าน</th><th>ชื่อ-สาขา</th><th>วันส่ง</th><th>รายการ</th><th>โทร</th><th>หมายเหตุ</th></tr></thead>
         <tbody id="tbody"></tbody></table>
         <div class="pager">
           <button onclick="prevPage()">◀ ก่อนหน้า</button>
@@ -633,7 +723,9 @@ def dashboard():
       const tb=document.getElementById('tbody'); tb.innerHTML='';
       d.messages.forEach(r=>{
         const tr=document.createElement('tr');
-        tr.innerHTML='<td>'+r.id+'</td><td>'+r.received_at+'</td><td>'+ (r.user_id||'') +'</td><td>'+(r.message_type||r.event_type||'')+'</td><td>'+ (r.text||'') +'</td>';
+        let items=r.items; if(typeof items==='string'){try{items=JSON.parse(items);}catch(e){}} 
+        const itemStr=Array.isArray(items)?items.map(it=>(it.product||'')+'='+ (it.qty||'')).join(', '):(items||'');
+        tr.innerHTML='<td>'+r.id+'</td><td>'+r.received_at+'</td><td>'+(r.user_id||'')+'</td><td>'+(r.store_code||'')+'</td><td>'+(r.store_name||'')+(r.branch?' - '+r.branch:'')+'</td><td>'+(r.delivery_date||'')+'</td><td>'+itemStr+'</td><td>'+(r.phone||'')+'</td><td>'+(r.note||'')+'</td>';
         tb.appendChild(tr);
       });
       document.getElementById('pageinfo').textContent='แสดง '+(offset+1)+'-'+Math.min(offset+limit,total)+' จาก '+total;
